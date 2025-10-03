@@ -1,16 +1,18 @@
 """
-Utils Package
-Save as: backend/utils/__init__.py
+Utilities Package
 """
-
-from .helpers import (
-    generate_session_id,
-    validate_pdf_file,
-    format_file_size
+from .pdf_processor import (
+    extract_text_blocks,
+    render_page_as_image,
+    save_thumbnail,
+    apply_text_edits,
+    apply_signatures
 )
 
 __all__ = [
-    'generate_session_id',
-    'validate_pdf_file',
-    'format_file_size'
+    "extract_text_blocks",
+    "render_page_as_image",
+    "save_thumbnail",
+    "apply_text_edits",
+    "apply_signatures"
 ]

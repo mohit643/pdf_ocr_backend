@@ -11,6 +11,23 @@ from datetime import datetime
 
 # ============ PDF Operations ============
 
+def create_user_with_password(
+    db: Session, 
+    email: str, 
+    name: str, 
+    hashed_password: str
+) -> User:
+    """Create new user with hashed password"""
+    user = User(
+        email=email, 
+        name=name,
+        hashed_password=hashed_password  # Ye field User model mein hona chahiye
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
 def create_pdf(
     db: Session,
     original_filename: str,
@@ -72,6 +89,20 @@ def delete_pdf(db: Session, pdf_id: int) -> bool:
         return True
     return False
 
+def get_user_pdfs(db: Session, user_id: int, skip: int = 0, limit: int = 100) -> List[PDF]:
+    """Get PDFs for a specific user"""
+    return db.query(PDF).filter(
+        PDF.user_id == user_id,
+        PDF.is_active == True
+    ).order_by(PDF.uploaded_at.desc()).offset(skip).limit(limit).all()
+
+def search_user_pdfs(db: Session, user_id: int, query: str) -> List[PDF]:
+    """Search PDFs for a specific user"""
+    return db.query(PDF).filter(
+        PDF.user_id == user_id,
+        PDF.is_active == True,
+        PDF.original_filename.ilike(f"%{query}%")
+    ).order_by(PDF.uploaded_at.desc()).all()
 def search_pdfs(
     db: Session,
     query: str,

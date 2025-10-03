@@ -3,24 +3,68 @@ Pydantic Schemas for API Validation
 Save as: backend/schemas.py
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional
 from datetime import datetime
+
+# ============ Authentication Models ============
+
+class UserRegister(BaseModel):
+    """User registration request"""
+    email: EmailStr = Field(..., description="User email address")
+    password: str = Field(..., min_length=6, description="Password (min 6 characters)")
+    name: Optional[str] = Field(None, description="User's full name")
+
+class UserLogin(BaseModel):
+    """User login request"""
+    email: EmailStr = Field(..., description="User email address")
+    password: str = Field(..., description="User password")
+
+class SendOTP(BaseModel):
+    """Send OTP request"""
+    email: EmailStr = Field(..., description="Email to send OTP to")
+
+class VerifyOTP(BaseModel):
+    """Verify OTP request"""
+    email: EmailStr = Field(..., description="User email address")
+    otp: str = Field(..., min_length=6, max_length=6, description="6-digit OTP")
+
+class ResetPassword(BaseModel):
+    """Reset password request"""
+    email: EmailStr = Field(..., description="User email address")
+    otp: str = Field(..., min_length=6, max_length=6, description="6-digit OTP")
+    new_password: str = Field(..., min_length=6, description="New password (min 6 characters)")
+
+class Token(BaseModel):
+    """JWT token response"""
+    access_token: str
+    token_type: str = "bearer"
+    user: dict
+
+class UserResponse(BaseModel):
+    """User response model"""
+    id: int
+    email: str
+    name: Optional[str]
+    google_drive_folder_id: Optional[str]
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
 
 # ============ Request Models ============
 
 class TextEdit(BaseModel):
     """Text edit request"""
     page: int = Field(..., ge=0, description="Page number (0-indexed)")
-    bbox: List[float] = Field(..., min_items=4, max_items=4, description="Bounding box [x0, y0, x1, y1]")
+    bbox: List[float] = Field(..., min_length=4, max_length=4, description="Bounding box [x0, y0, x1, y1]")
     old_text: str = Field(..., description="Original text")
     new_text: str = Field(..., description="New text")
     fontSize: int = Field(..., gt=0, description="Font size")
     color: Optional[str] = Field("#000000", description="Text color in hex")
 
-
-
 class Signature(BaseModel):
+    """Signature model"""
     page: int
     x: float
     y: float

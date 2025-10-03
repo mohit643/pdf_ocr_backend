@@ -10,16 +10,33 @@ class User(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String(255), unique=True, index=True, nullable=False)
+    password_hash = Column(String(255), nullable=False)  # ADD THIS
     name = Column(String(255))
+    google_drive_folder_id = Column(String(255))  # ADD THIS
+    is_active = Column(Boolean, default=True)  # ADD THIS
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)  # ADD THIS
     
     pdfs = relationship("PDF", back_populates="user", cascade="all, delete-orphan")
+    logs = relationship("ActivityLog", back_populates="user", cascade="all, delete-orphan")
+
+
+class OTP(Base):  # ADD THIS ENTIRE CLASS
+    __tablename__ = "otps"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String(255), index=True, nullable=False)
+    otp = Column(String(6), nullable=False)
+    purpose = Column(String(50))  # 'login', 'register', 'reset_password'
+    is_verified = Column(Boolean, default=False)
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 class PDF(Base):
     __tablename__ = "pdfs"
     
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # Keep nullable=True for now
     
     original_filename = Column(String(500), nullable=False)
     stored_filename = Column(String(500), nullable=False, unique=True)
@@ -106,3 +123,4 @@ class ActivityLog(Base):
     ip_address = Column(String(50))
     
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    user = relationship("User", back_populates="logs")
