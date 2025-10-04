@@ -23,16 +23,16 @@ oauth_service = OAuthService(
     redirect_uri=settings.GOOGLE_REDIRECT_URI
 )
 
-# create_access_token
 def create_access_token(user_data: dict) -> str:
+    """Create JWT access token"""
     payload = {
         "sub": user_data["email"],
         "user_id": user_data["id"],
         "name": user_data["name"],
         "exp": datetime.utcnow() + timedelta(hours=settings.JWT_EXPIRATION_HOURS)
     }
-    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
-
+    # Use SECRET_KEY instead of JWT_SECRET_KEY
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 @router.get("/google/login")
 async def google_login():
@@ -103,30 +103,27 @@ async def google_callback(code: str, state: str = None):
             "created_at": datetime.now().isoformat()
         }
         
-        # Redirect to production frontend
-        frontend_url = f"https://document-read-production.up.railway.app?token={jwt_token}"
+        # Redirect to frontend
+        frontend_url = f"http://localhost:3000?token={jwt_token}"
         return RedirectResponse(url=frontend_url)
         
     except Exception as e:
         print(f"OAuth error: {str(e)}")
         import traceback
         traceback.print_exc()
-        return RedirectResponse(url="https://document-read-production.up.railway.app?error=auth_failed")
-
-
-
-@router.get("/me")
-async def get_current_user(authorization: str = Header(None)):
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(401, "Missing or invalid Authorization header")
+        return RedirectResponse(url="http://localhost:3000?error=auth_failed")
     
-    token = authorization.split(" ")[1]
+@router.get("/me")
+async def get_current_user(token: str):
+    """Get current user info from token"""
     try:
         payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
         user_email = payload.get("sub")
+        
         user = USERS.get(user_email)
         if not user:
             raise HTTPException(404, "User not found")
+        
         return {
             "id": user["id"],
             "email": user["email"],
@@ -137,7 +134,7 @@ async def get_current_user(authorization: str = Header(None)):
         raise HTTPException(401, "Token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(401, "Invalid token")
-    
+
 @router.post("/logout")
 async def logout(token: str):
     """Logout user"""
