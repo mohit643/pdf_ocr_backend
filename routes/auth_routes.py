@@ -104,7 +104,7 @@ async def google_callback(code: str, state: str = None):
         }
         
         # Redirect to frontend
-        frontend_url = f"http://localhost:3000?token={jwt_token}"
+        frontend_url = f"https://document-read-production.up.railway.app/?token={jwt_token}"
         return RedirectResponse(url=frontend_url)
         
     except Exception as e:
