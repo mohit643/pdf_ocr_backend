@@ -15,8 +15,7 @@ app.add_middleware(
     CORSMiddleware,
    allow_origins=[
         "http://localhost:3000",
-        "https://pdfocrbackend-production.up.railway.app",
-        "document-read-production.up.railway.app",  # Ye add karo
+        "https://document-read-production.up.railway.app",  # Add this
     ],
     allow_credentials=True,
     allow_methods=["*"],
