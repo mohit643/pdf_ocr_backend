@@ -3,7 +3,7 @@ uvicorn[standard]==0.24.0
 python-multipart==0.0.6
 sqlalchemy==2.0.23
 psycopg2-binary==2.9.9
-PyMuPDF-binary==1.23.8
+PyMuPDF==1.23.8
 redis==5.0.1
 python-dotenv==1.0.0
 pydantic==2.5.0
@@ -11,7 +11,7 @@ pydantic-settings==2.1.0
 pillow==10.1.0
 httpx==0.25.2
 pyjwt==2.8.0
-google-auth==2.25.2 
+google-auth==2.25.2
 google-auth-oauthlib==1.2.0
 google-auth-httplib2==0.2.0
 google-api-python-client==2.110.0
