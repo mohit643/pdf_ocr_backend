@@ -1,8 +1,6 @@
 """
 Configuration Settings
-Save as: backend/config.py
 """
-
 from pydantic_settings import BaseSettings
 from pathlib import Path
 import os
@@ -10,13 +8,18 @@ import os
 class Settings(BaseSettings):
     """Application settings from environment variables"""
     
-    # Database
-    DATABASE_URL: str = "postgresql://postgres:password@localhost:5432/pdf_editor"
+    # OAuth Settings
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+    GOOGLE_REDIRECT_URI: str = "http://localhost:8000/api/auth/google/callback"
     
-    # Redis (optional)
-    REDIS_HOST: str = "localhost"
-    REDIS_PORT: int = 6379
-    REDIS_ENABLED: bool = False
+    # JWT Settings
+    SECRET_KEY: str = "change-this-in-production-use-strong-key"
+    JWT_SECRET_KEY: str = "change-this-in-production-use-strong-key"  # Add this line
+    ALGORITHM: str = "HS256"
+    JWT_ALGORITHM: str = "HS256"  # Add this line
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
+    JWT_EXPIRATION_HOURS: int = 24
     
     # Storage paths
     UPLOAD_DIR: Path = Path("uploads")
@@ -24,17 +27,12 @@ class Settings(BaseSettings):
     THUMBNAIL_DIR: Path = Path("thumbnails")
     
     # File limits
-    MAX_FILE_SIZE: int = 50 * 1024 * 1024  # 50 MB
+    MAX_FILE_SIZE: int = 50 * 1024 * 1024
     MAX_FILES_PER_USER: int = 100
     ALLOWED_EXTENSIONS: list = [".pdf"]
     
     # Session settings
-    SESSION_EXPIRY: int = 21600  # 6 hours
-    
-    # Security
-    SECRET_KEY: str = "change-this-in-production-use-strong-key"
-    ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    SESSION_EXPIRY: int = 21600
     
     # Server settings
     HOST: str = "0.0.0.0"
@@ -59,4 +57,4 @@ settings = Settings()
 for directory in [settings.UPLOAD_DIR, settings.OUTPUT_DIR, settings.THUMBNAIL_DIR]:
     directory.mkdir(parents=True, exist_ok=True)
 
-print(f"✅ Config loaded - Database: {settings.DATABASE_URL[:30]}...")
+print(f"✅ Config loaded - OAuth enabled")
