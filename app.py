@@ -13,7 +13,11 @@ app = FastAPI(title="PDF Editor API", version="4.0")
 # CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+   allow_origins=[
+        "http://localhost:3000",
+        "https://pdfocrbackend-production.up.railway.app",
+        "document-read-production.up.railway.app",  # Ye add karo
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
