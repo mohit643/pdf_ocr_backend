@@ -1,12 +1,15 @@
 """
 PDF Editor API - Main Application with OAuth
 """
+import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from config import settings
 from routes import auth_router, pdf_router
+import uvicorn
+
 
 app = FastAPI(title="PDF Editor API", version="4.0")
 
@@ -51,5 +54,5 @@ def root():
     }
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
+    port = int(os.environ.get("PORT", 8000))
+uvicorn.run(app, host="0.0.0.0", port=port)
