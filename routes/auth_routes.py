@@ -1,9 +1,10 @@
 """
 OAuth Authentication Routes
 """
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException,Depends, Response
 from fastapi.responses import RedirectResponse, JSONResponse
 from datetime import datetime, timedelta
+from fastapi.security import OAuth2PasswordBearer
 import jwt
 import uuid
 
@@ -114,8 +115,8 @@ async def google_callback(code: str, state: str = None):
         return RedirectResponse(url="http://localhost:3000?error=auth_failed")
     
 @router.get("/me")
-async def get_current_user(token: str):
-    """Get current user info from token"""
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+    """Get current user info from Authorization Bearer token"""
     try:
         payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
         user_email = payload.get("sub")
