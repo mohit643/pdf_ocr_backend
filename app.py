@@ -8,7 +8,8 @@ from fastapi.staticfiles import StaticFiles
 
 from config import settings
 from routes import auth_router, pdf_router
-import uvicorn
+
+import os
 
 
 app = FastAPI(title="PDF Editor API", version="4.0")
