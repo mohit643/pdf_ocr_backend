@@ -1,7 +1,6 @@
 """
 PDF Editor API - Main Application with OAuth
 """
-import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -9,16 +8,13 @@ from fastapi.staticfiles import StaticFiles
 from config import settings
 from routes import auth_router, pdf_router
 
-import os
-
-
 app = FastAPI(title="PDF Editor API", version="4.0")
 
 # CORS
 app.add_middleware(
     CORSMiddleware,
    allow_origins=[
-        "http://localhost:3000",
+        # "http://localhost:3000",
         "https://document-read-production.up.railway.app",  # Add this
     ],
     allow_credentials=True,
@@ -55,5 +51,5 @@ def root():
     }
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))
-uvicorn.run(app, host="0.0.0.0", port=port)
+    import uvicorn
+    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
