@@ -17,6 +17,8 @@ router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 USERS = {}
 SESSIONS = {}
 
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/google/login")
+
 # Initialize OAuth service
 oauth_service = OAuthService(
     client_id=settings.GOOGLE_CLIENT_ID,
@@ -115,10 +117,11 @@ async def google_callback(code: str, state: str = None):
         return RedirectResponse(url="http://localhost:3000?error=auth_failed")
     
 @router.get("/me")
-async def get_current_user(token: str = Depends(oauth2_scheme)):
-    """Get current user info from Authorization Bearer token"""
+async def get_current_user(token: str):
+    """Get current user info from query param token"""
     try:
-        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+        # ✅ Decode with same secret and algorithm used in create_access_token
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         user_email = payload.get("sub")
         
         user = USERS.get(user_email)
@@ -135,6 +138,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         raise HTTPException(401, "Token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(401, "Invalid token")
+
 
 @router.post("/logout")
 async def logout(token: str):
