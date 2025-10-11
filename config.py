@@ -15,11 +15,31 @@ class Settings(BaseSettings):
     
     # JWT Settings
     SECRET_KEY: str = "change-this-in-production-use-strong-key"
-    JWT_SECRET_KEY: str = "change-this-in-production-use-strong-key"  # Add this line
+    JWT_SECRET_KEY: str = "change-this-in-production-use-strong-key"
     ALGORITHM: str = "HS256"
-    JWT_ALGORITHM: str = "HS256"  # Add this line
+    JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
     JWT_EXPIRATION_HOURS: int = 24
+    
+    # ✅ NEW: Database Settings
+    DATABASE_URL: str = "postgresql://postgres:Mohit%4018@localhost:5432/pdf_editor"
+    
+    # ✅ NEW: Stripe Settings
+    STRIPE_SECRET_KEY: str = ""
+    STRIPE_PUBLISHABLE_KEY: str = ""
+    STRIPE_WEBHOOK_SECRET: str = ""
+    
+    # ✅ NEW: Frontend URL
+    FRONTEND_URL: str = "http://localhost:3000"
+    
+    # ✅ NEW: Subscription Plan Limits
+    PLAN_FREE_LIMIT: int = 5
+    PLAN_BASIC_LIMIT: int = 50
+    PLAN_PRO_LIMIT: int = -1  # Unlimited
+    
+    PLAN_FREE_PRICE: float = 0.0
+    PLAN_BASIC_PRICE: float = 9.0
+    PLAN_PRO_PRICE: float = 29.0
     
     # Storage paths
     UPLOAD_DIR: Path = Path("uploads")
@@ -43,7 +63,9 @@ class Settings(BaseSettings):
     CORS_ORIGINS: list = [
         "http://localhost:3000",
         "http://localhost:5173",
-        "http://localhost:8080"
+        "http://localhost:8080",
+        "http://127.0.0.1:3000",  # ✅ Added
+        "http://127.0.0.1:5173",  # ✅ Added
     ]
     
     class Config:
@@ -57,4 +79,4 @@ settings = Settings()
 for directory in [settings.UPLOAD_DIR, settings.OUTPUT_DIR, settings.THUMBNAIL_DIR]:
     directory.mkdir(parents=True, exist_ok=True)
 
-print(f"✅ Config loaded - OAuth enabled")
+print(f"✅ Config loaded - OAuth & Database enabled")

@@ -5,15 +5,19 @@ from fastapi import APIRouter, HTTPException, Depends, Response
 from fastapi.responses import RedirectResponse, JSONResponse
 from datetime import datetime, timedelta
 from fastapi.security import OAuth2PasswordBearer
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 import jwt
 import uuid
 
 from config import settings
 from services.oauth_service import OAuthService
+from database import get_db
+from models.user import User
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
-# In-memory user storage (replace with database if needed later)
+# In-memory user storage (for backward compatibility)
 USERS = {}
 SESSIONS = {}
 
@@ -61,7 +65,7 @@ async def google_login():
     return RedirectResponse(url=auth_url)
 
 @router.get("/google/callback")
-async def google_callback(code: str, state: str = None):
+async def google_callback(code: str, state: str = None, db: AsyncSession = Depends(get_db)):
     """Handle Google OAuth callback"""
     try:
         print("=== OAuth Callback Started ===")
@@ -70,7 +74,7 @@ async def google_callback(code: str, state: str = None):
         token_data = await oauth_service.exchange_code_for_token(code)
         access_token = token_data.get("access_token")
         refresh_token = token_data.get("refresh_token")
-        token_expiry = token_data.get("expires_in", 3600)  # Default 1 hour
+        token_expiry = token_data.get("expires_in", 3600)
         
         if not access_token:
             raise HTTPException(400, "No access token received")
@@ -81,13 +85,13 @@ async def google_callback(code: str, state: str = None):
         # Get user info
         user_info = await oauth_service.get_user_info(access_token)
         user_email = user_info.get("email")
-        user_id = USERS.get(user_email, {}).get("id")
         
-        if not user_id:
-            # Create new user
-            user_id = str(uuid.uuid4())
-            
-            # Create Drive folder for user
+        # ✅ CHECK DATABASE FIRST
+        result = await db.execute(select(User).where(User.email == user_email))
+        db_user = result.scalar_one_or_none()
+        
+        if not db_user:
+            # Create Drive folder
             try:
                 from services.drive_service import DriveService
                 drive = DriveService(access_token, refresh_token)
@@ -102,8 +106,34 @@ async def google_callback(code: str, state: str = None):
                 drive_folder_id = None
                 drive_folder_link = None
             
+            # ✅ CREATE USER IN DATABASE
+            db_user = User(
+                email=user_email,
+                name=user_info.get("name"),
+                picture=user_info.get("picture"),
+                google_id=user_info.get("id"),
+                google_access_token=access_token,
+                google_refresh_token=refresh_token,
+                token_expiry=datetime.utcnow() + timedelta(seconds=token_expiry),
+                drive_folder_id=drive_folder_id,
+                drive_folder_link=drive_folder_link,
+                current_plan="free",
+                pdf_limit=5,
+                pdf_count_this_month=0,
+                is_active=True,
+                is_verified=True,
+                last_login=datetime.utcnow()
+            )
+            
+            db.add(db_user)
+            await db.commit()
+            await db.refresh(db_user)
+            
+            print(f"✅ User created in DATABASE: {user_email} (ID: {db_user.id})")
+            
+            # Store in memory for backward compatibility
             USERS[user_email] = {
-                "id": user_id,
+                "id": str(db_user.id),
                 "email": user_email,
                 "name": user_info.get("name"),
                 "picture": user_info.get("picture"),
@@ -114,22 +144,43 @@ async def google_callback(code: str, state: str = None):
                 "token_expiry": (datetime.utcnow() + timedelta(seconds=token_expiry)).isoformat(),
                 "created_at": datetime.utcnow().isoformat()
             }
-            print(f"✅ New user created: {user_email}")
         else:
-            # Update existing user tokens
-            USERS[user_email]["google_access_token"] = access_token
+            # ✅ UPDATE EXISTING USER IN DATABASE
+            db_user.google_access_token = access_token
             if refresh_token:
-                USERS[user_email]["google_refresh_token"] = refresh_token
-            USERS[user_email]["token_expiry"] = (datetime.utcnow() + timedelta(seconds=token_expiry)).isoformat()
-            print(f"✅ Existing user tokens updated: {user_email}")
+                db_user.google_refresh_token = refresh_token
+            db_user.token_expiry = datetime.utcnow() + timedelta(seconds=token_expiry)
+            db_user.last_login = datetime.utcnow()
+            
+            await db.commit()
+            
+            print(f"✅ User updated in DATABASE: {user_email}")
+            
+            # Update memory
+            USERS[user_email] = {
+                "id": str(db_user.id),
+                "email": db_user.email,
+                "name": db_user.name,
+                "picture": db_user.picture,
+                "drive_folder_id": db_user.drive_folder_id,
+                "drive_folder_link": db_user.drive_folder_link,
+                "google_access_token": access_token,
+                "google_refresh_token": refresh_token,
+                "token_expiry": (datetime.utcnow() + timedelta(seconds=token_expiry)).isoformat(),
+                "created_at": db_user.created_at.isoformat() if db_user.created_at else datetime.utcnow().isoformat()
+            }
         
         # Create JWT token
-        jwt_token = create_access_token(USERS[user_email])
+        jwt_token = create_access_token({
+            "id": str(db_user.id),
+            "email": db_user.email,
+            "name": db_user.name
+        })
         
         # Store session
         SESSIONS[jwt_token] = {
-            "user_id": user_id,
-            "email": user_email,
+            "user_id": str(db_user.id),
+            "email": db_user.email,
             "created_at": datetime.utcnow().isoformat()
         }
         
@@ -137,7 +188,6 @@ async def google_callback(code: str, state: str = None):
         
         # Redirect to frontend
         frontend_url = f"http://localhost:3000/?token={jwt_token}"
-        # frontend_url = f"https://document-read-production.up.railway.app/?token={jwt_token}"
         
         return RedirectResponse(url=frontend_url)
         
@@ -148,15 +198,39 @@ async def google_callback(code: str, state: str = None):
         return RedirectResponse(url="http://localhost:3000?error=auth_failed")
 
 @router.get("/me")
-async def get_current_user(token: str):
+async def get_current_user(token: str, db: AsyncSession = Depends(get_db)):
     """Get current user info from query param token"""
     try:
         payload = verify_token(token)
         user_email = payload.get("sub")
         
+        # Check memory first
         user = USERS.get(user_email)
+        
+        # If not in memory, load from database
         if not user:
-            raise HTTPException(404, "User not found")
+            print(f"⚠️ User not in memory, loading from database: {user_email}")
+            result = await db.execute(select(User).where(User.email == user_email))
+            db_user = result.scalar_one_or_none()
+            
+            if not db_user:
+                raise HTTPException(404, "User not found")
+            
+            # Load into memory
+            USERS[user_email] = {
+                "id": str(db_user.id),
+                "email": db_user.email,
+                "name": db_user.name,
+                "picture": db_user.picture,
+                "drive_folder_id": db_user.drive_folder_id,
+                "drive_folder_link": db_user.drive_folder_link,
+                "google_access_token": db_user.google_access_token,
+                "google_refresh_token": db_user.google_refresh_token,
+                "token_expiry": db_user.token_expiry.isoformat() if db_user.token_expiry else datetime.utcnow().isoformat(),
+                "created_at": db_user.created_at.isoformat() if db_user.created_at else datetime.utcnow().isoformat()
+            }
+            user = USERS[user_email]
+            print(f"✅ User loaded from database into memory")
         
         return {
             "id": user["id"],
@@ -166,43 +240,75 @@ async def get_current_user(token: str):
             "drive_folder_id": user.get("drive_folder_id"),
             "drive_folder_link": user.get("drive_folder_link")
         }
+    except HTTPException:
+        raise
     except Exception as e:
+        print(f"❌ Get user error: {str(e)}")
         raise HTTPException(401, f"Authentication failed: {str(e)}")
 
 @router.get("/drive-token")
-async def get_drive_token(token: str):
+async def get_drive_token(token: str, db: AsyncSession = Depends(get_db)):
     """Get Google Drive access token for authenticated user"""
     try:
-        # Verify JWT token
         payload = verify_token(token)
         user_email = payload.get("sub")
         
+        # Check memory first
         user = USERS.get(user_email)
-        if not user:
-            raise HTTPException(404, "User not found")
         
-        # Check if token is expired
+        # If not in memory, load from database
+        if not user:
+            print(f"⚠️ User not in memory, loading from database: {user_email}")
+            result = await db.execute(select(User).where(User.email == user_email))
+            db_user = result.scalar_one_or_none()
+            
+            if not db_user:
+                raise HTTPException(404, "User not found")
+            
+            # Load into memory
+            USERS[user_email] = {
+                "id": str(db_user.id),
+                "email": db_user.email,
+                "name": db_user.name,
+                "picture": db_user.picture,
+                "drive_folder_id": db_user.drive_folder_id,
+                "drive_folder_link": db_user.drive_folder_link,
+                "google_access_token": db_user.google_access_token,
+                "google_refresh_token": db_user.google_refresh_token,
+                "token_expiry": db_user.token_expiry.isoformat() if db_user.token_expiry else datetime.utcnow().isoformat(),
+                "created_at": db_user.created_at.isoformat() if db_user.created_at else datetime.utcnow().isoformat()
+            }
+            user = USERS[user_email]
+            print(f"✅ User loaded from database into memory")
+        
         token_expiry = datetime.fromisoformat(user.get("token_expiry", datetime.utcnow().isoformat()))
         
         if datetime.utcnow() >= token_expiry:
             print(f"⚠️ Token expired for {user_email}, refreshing...")
             
-            # Refresh token
             refresh_token = user.get("google_refresh_token")
             if not refresh_token:
                 raise HTTPException(401, "No refresh token available. Please login again.")
             
             try:
-                # Refresh the access token
                 new_token_data = await oauth_service.refresh_access_token(refresh_token)
                 new_access_token = new_token_data.get("access_token")
                 new_expiry = new_token_data.get("expires_in", 3600)
                 
-                # Update user data
+                # Update memory
                 USERS[user_email]["google_access_token"] = new_access_token
                 USERS[user_email]["token_expiry"] = (
                     datetime.utcnow() + timedelta(seconds=new_expiry)
                 ).isoformat()
+                
+                # Update database
+                result = await db.execute(select(User).where(User.email == user_email))
+                db_user = result.scalar_one_or_none()
+                if db_user:
+                    db_user.google_access_token = new_access_token
+                    db_user.token_expiry = datetime.utcnow() + timedelta(seconds=new_expiry)
+                    await db.commit()
+                    print(f"✅ Token updated in database")
                 
                 print(f"✅ Token refreshed for {user_email}")
                 
@@ -216,7 +322,6 @@ async def get_drive_token(token: str):
                 print(f"❌ Token refresh failed: {e}")
                 raise HTTPException(401, "Token refresh failed. Please login again.")
         
-        # Token is still valid
         return {
             "access_token": user["google_access_token"],
             "expires_in": int((token_expiry - datetime.utcnow()).total_seconds()),
@@ -227,17 +332,17 @@ async def get_drive_token(token: str):
         raise
     except Exception as e:
         print(f"❌ Drive token error: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(500, f"Failed to get Drive token: {str(e)}")
-
+    
 @router.post("/logout")
 async def logout(token: str):
     """Logout user and clear session"""
     try:
-        # Verify token
         payload = verify_token(token)
         user_email = payload.get("sub")
         
-        # Remove session
         if token in SESSIONS:
             del SESSIONS[token]
         
@@ -246,7 +351,6 @@ async def logout(token: str):
         return {"message": "Logged out successfully"}
         
     except Exception as e:
-        # Even if token is invalid, still return success
         return {"message": "Logged out successfully"}
 
 @router.get("/validate")

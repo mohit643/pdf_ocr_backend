@@ -7,23 +7,34 @@ from googleapiclient.http import MediaIoBaseUpload
 from typing import Optional
 import io
 from pathlib import Path
+from routes.auth_routes import router as auth_router
+from routes.pdf_routes import router as pdf_router
+from routes.drive import router as drive_router
+
+# Import database - ✅ NEW
+from database import init_db, close_db
 
 # Import your routers
 from routes.auth_routes import router as auth_router
 from routes.pdf_routes import router as pdf_router
-from routes.drive import router as drive_router 
-app = FastAPI(title="PDF Editor API", version="4.0")
+from routes.drive import router as drive_router
+from routes.subscription_routes import router as subscription_router  # ✅ NEW
+from routes.payment_routes import router as payment_router  # ✅ NEW
+
+app = FastAPI(title="PDF Editor API", version="5.0")  # ✅ Changed version
 
 # CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
+        "http://127.0.0.1:3000",  # ✅ NEW
         # "https://document-read-production.up.railway.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],  # ✅ NEW
 )
 
 # Create directories if not exist
@@ -36,48 +47,113 @@ app.mount("/outputs", StaticFiles(directory="outputs"), name="outputs")
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 app.mount("/thumbnails", StaticFiles(directory="thumbnails"), name="thumbnails")
 
-# Include routers - YE IMPORTANT HAI ✅
+# Include routers
 app.include_router(auth_router)
 app.include_router(pdf_router)
 app.include_router(drive_router)
+app.include_router(subscription_router)  # ✅ NEW
+app.include_router(payment_router)  # ✅ NEW
 
 @app.on_event("startup")
 async def startup_event():
     print("=" * 60)
-    print("PDF Editor API Starting with OAuth...")
+    print("PDF Editor API Starting with OAuth & Subscriptions...")  # ✅ Updated message
     print("=" * 60)
+    
+    # ✅ NEW: Initialize database
+    await init_db()
+    
+    # ✅ NEW: Initialize subscription plans
+    from database import AsyncSessionLocal
+    from services.subscription_service import SubscriptionService
+    from config import settings
+    
+    async with AsyncSessionLocal() as db:
+        try:
+            # Create Free Plan
+            await SubscriptionService.get_or_create_plan(
+                db=db,
+                name="free",
+                display_name="Free Plan",
+                description="Perfect for trying out our PDF editor",
+                price=0.0,
+                pdf_limit=settings.PLAN_FREE_LIMIT
+            )
+            
+            # Create Basic Plan
+            await SubscriptionService.get_or_create_plan(
+                db=db,
+                name="basic",
+                display_name="Basic Plan",
+                description="For regular users",
+                price=settings.PLAN_BASIC_PRICE,
+                pdf_limit=settings.PLAN_BASIC_LIMIT,
+              stripe_price_id="price_1SGZRZ3NlamZyfzGvvCrzEig"
+            )
+            
+            # Create Pro Plan
+            await SubscriptionService.get_or_create_plan(
+                db=db,
+                name="pro",
+                display_name="Pro Plan",
+                description="Unlimited PDF processing",
+                price=settings.PLAN_PRO_PRICE,
+                pdf_limit=settings.PLAN_PRO_LIMIT,
+                 stripe_price_id="price_1SGZRy3NlamZyfzGTjyp9hj3" 
+            )
+            
+            print("✅ Subscription plans initialized")
+        except Exception as e:
+            print(f"⚠️ Plan initialization warning: {e}")
+    
     try:
         from config import settings
         print(f"📁 Upload folder: {settings.UPLOAD_DIR.absolute()}")
         print(f"📁 Output folder: {settings.OUTPUT_DIR.absolute()}")
         print(f"📁 Thumbnail folder: {settings.THUMBNAIL_DIR.absolute()}")
+        print(f"🗄️  Database: Connected")  # ✅ NEW
     except:
         print(f"📁 Upload folder: {Path('uploads').absolute()}")
         print(f"📁 Output folder: {Path('outputs').absolute()}")
         print(f"📁 Thumbnail folder: {Path('thumbnails').absolute()}")
+    
     print("=" * 60)
     print("✅ Available Endpoints:")
-    print("   - GET  /                    (Root)")
-    print("   - GET  /api/stats           (Statistics)")
-    print("   - POST /api/upload          (Upload PDF)")
-    print("   - POST /api/download        (Download Edited PDF)")
-    print("   - POST /upload-to-drive     (Manual Drive Upload)")
-    print("   - POST /list-drive-files    (List Drive Files)")
+    print("   - GET  /                           (Root)")
+    print("   - GET  /api/stats                  (Statistics)")
+    print("   - POST /api/upload                 (Upload PDF)")
+    print("   - POST /api/download               (Download Edited PDF)")
+    print("   - POST /upload-to-drive            (Manual Drive Upload)")
+    print("   - POST /list-drive-files           (List Drive Files)")
+    print("   - GET  /api/subscription/plans     (Get Plans) ✅")  # ✅ NEW
+    print("   - GET  /api/subscription/my-subscription (My Subscription) ✅")  # ✅ NEW
+    print("   - POST /api/subscription/create-checkout (Create Checkout) ✅")  # ✅ NEW
+    print("   - POST /api/payment/webhook        (Stripe Webhook) ✅")  # ✅ NEW
     print("=" * 60)
+
+@app.on_event("shutdown")  # ✅ NEW
+async def shutdown_event():
+    await close_db()
+    print("🔒 Application shutdown complete")
 
 @app.get("/")
 def root():
     return {
         "app": "PDF Editor API",
-        "version": "4.0",
+        "version": "5.0",  # ✅ Updated version
         "status": "running",
         "oauth": "enabled",
+        "features": ["oauth", "subscriptions", "stripe"],  # ✅ NEW
         "endpoints": {
             "stats": "/api/stats",
             "upload": "/api/upload",
             "download": "/api/download",
             "drive_upload": "/upload-to-drive",
-            "drive_list": "/list-drive-files"
+            "drive_list": "/list-drive-files",
+            "subscription_plans": "/api/subscription/plans",  # ✅ NEW
+            "my_subscription": "/api/subscription/my-subscription",  # ✅ NEW
+            "create_checkout": "/api/subscription/create-checkout",  # ✅ NEW
+            "stripe_webhook": "/api/payment/webhook"  # ✅ NEW
         }
     }
 
@@ -209,8 +285,9 @@ async def health_check():
     """Health check endpoint"""
     return {
         "status": "healthy",
-        "version": "4.0",
-        "service": "PDF Editor API"
+        "version": "5.0",  # ✅ Updated
+        "service": "PDF Editor API",
+        "features": ["oauth", "database", "subscriptions"]  # ✅ NEW
     }
 
 if __name__ == "__main__":
