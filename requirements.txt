@@ -7,7 +7,7 @@ PyMuPDF==1.23.8
 redis==5.0.1
 python-dotenv==1.0.0
 pydantic==2.5.0
-pydantic-settings==2.1. 
+pydantic-settings==2.1.0
 pillow==10.1.0
 httpx==0.25.2
 pyjwt==2.8.0
@@ -19,6 +19,9 @@ Flask
 google-api-python-client
 google-auth-oauthlib
 google-auth-httplib2
-
+Pillow==10.1.0
+img2pdf==0.5.0
+python-docx==1.1.0
+reportlab==4.0.7
 
 
