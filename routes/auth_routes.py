@@ -187,15 +187,17 @@ async def google_callback(code: str, state: str = None, db: AsyncSession = Depen
         print(f"✅ Session created for: {user_email}")
         
         # Redirect to frontend
-        frontend_url = f"http://localhost:3000/?token={jwt_token}"
-        
+#        frontend_url = f"http://localhost:3000/?token={jwt_token}"
+        frontend_url = f"{settings.FRONTEND_URL}/?token={jwt_token}"
+      
         return RedirectResponse(url=frontend_url)
         
     except Exception as e:
         print(f"❌ OAuth error: {str(e)}")
         import traceback
         traceback.print_exc()
-        return RedirectResponse(url="http://localhost:3000?error=auth_failed")
+#        return RedirectResponse(url="http://localhost:3000?error=auth_failed")
+        return RedirectResponse(url=f"{settings.FRONTEND_URL}?error=auth_failed")
 
 @router.get("/me")
 async def get_current_user(token: str, db: AsyncSession = Depends(get_db)):

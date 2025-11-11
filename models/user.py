@@ -1,39 +1,36 @@
 """
-User Model with Subscription Support
+User model for managing user accounts and subscriptions
 """
-from sqlalchemy import Column, String, DateTime, Boolean, Integer, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Column, String, DateTime, Boolean, Integer
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import uuid
 from database import Base
 
+
 class User(Base):
     __tablename__ = "users"
     
-    # Primary Key
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # Primary Key - Changed from UUID to String for SQLite compatibility
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     
-    # Basic Info
-    email = Column(String(255), unique=True, nullable=False, index=True)
-    name = Column(String(255), nullable=False)
-    picture = Column(String(500), nullable=True)
-    
-    # OAuth Tokens
+    # User Info
+    email = Column(String(255), unique=True, nullable=False)
     google_id = Column(String(255), unique=True, nullable=True)
-    google_access_token = Column(Text, nullable=True)
-    google_refresh_token = Column(Text, nullable=True)
+    google_refresh_token = Column(String(500), nullable=True)
+    google_access_token = Column(String(500), nullable=True)
     token_expiry = Column(DateTime, nullable=True)
+    name = Column(String(255))
+    picture = Column(String(500))
     
-    # Google Drive Integration
-    drive_folder_id = Column(String(255), nullable=True)
-    drive_folder_link = Column(String(500), nullable=True)
-    
-    # Subscription Info
-    current_plan = Column(String(50), default="free")  # free, basic, pro
+    # Subscription & Limits
+    current_plan = Column(String(50), default="free")  # free, pro
     pdf_count_this_month = Column(Integer, default=0)
-    pdf_limit = Column(Integer, default=5)  # Based on plan
-    stripe_customer_id = Column(String(255), nullable=True)
+    pdf_limit = Column(Integer, default=3)  # Monthly limit
+    
+    # Drive Integration
+    drive_folder_id = Column(String(255))
+    drive_folder_link = Column(String(500))
     
     # Status
     is_active = Column(Boolean, default=True)

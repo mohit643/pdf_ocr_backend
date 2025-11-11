@@ -1,28 +1,49 @@
 """
-Subscription Models - Plans and User Subscriptions
+Subscription models for managing user subscriptions and plans
 """
-from sqlalchemy import Column, String, Integer, Float, DateTime, Boolean, ForeignKey, Text, Numeric
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Column, String, DateTime, Boolean, Integer, Float, ForeignKey
 from sqlalchemy.orm import relationship
-from datetime import datetime, timedelta
+from datetime import datetime
 import uuid
 from database import Base
+
 
 class SubscriptionPlan(Base):
     __tablename__ = "subscription_plans"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    name = Column(String(50), unique=True, nullable=False)
+    # Primary Key - Changed from UUID to String for SQLite compatibility
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    
+    # Plan Details
+    name = Column(String(50), unique=True, nullable=False)  # free, pro
     display_name = Column(String(100), nullable=False)
-    description = Column(Text)
-    price = Column(Numeric(10, 2), nullable=False)
-    pdf_limit = Column(Integer, nullable=False)
+    description = Column(String(500))
+    
+    # Pricing
+    price = Column(Float, default=0.0)
+    currency = Column(String(3), default="USD")
+    billing_period = Column(String(20), default="monthly")  # monthly, yearly
+    
+    # Features
+    pdf_limit = Column(Integer, default=3)  # -1 for unlimited
+    features = Column(String(1000))  # JSON string of features
+    
+    # Stripe
     stripe_price_id = Column(String(255))
+    stripe_product_id = Column(String(255))
+    
+    # Status
+    is_active = Column(Boolean, default=True)
+    
+    # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
-    user_subscriptions = relationship("UserSubscription", back_populates="plan")
+    subscriptions = relationship("UserSubscription", back_populates="plan")
+    
+    def __repr__(self):
+        return f"<SubscriptionPlan(name={self.name}, price={self.price})>"
     
     def to_dict(self):
         """Convert SubscriptionPlan to dictionary"""
@@ -31,9 +52,14 @@ class SubscriptionPlan(Base):
             "name": self.name,
             "display_name": self.display_name,
             "description": self.description,
-            "price": float(self.price),
+            "price": self.price,
+            "currency": self.currency,
+            "billing_period": self.billing_period,
             "pdf_limit": self.pdf_limit,
+            "features": self.features,
             "stripe_price_id": self.stripe_price_id,
+            "stripe_product_id": self.stripe_product_id,
+            "is_active": self.is_active,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None
         }
@@ -42,30 +68,29 @@ class SubscriptionPlan(Base):
 class UserSubscription(Base):
     __tablename__ = "user_subscriptions"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # Primary Key - Changed from UUID to String for SQLite compatibility
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     
-    # User Reference
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    
-    # Plan Reference
-    plan_id = Column(UUID(as_uuid=True), ForeignKey("subscription_plans.id"), nullable=False)
+    # Foreign Keys
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
+    plan_id = Column(String(36), ForeignKey("subscription_plans.id"), nullable=False)
     
     # Subscription Status
-    status = Column(String(50), default="active")  # active, cancelled, expired, past_due
+    status = Column(String(20), default="active")  # active, cancelled, expired, past_due
     
-    # Stripe Integration
-    stripe_subscription_id = Column(String(255), nullable=True, unique=True)
-    stripe_customer_id = Column(String(255), nullable=True)
+    # Stripe
+    stripe_subscription_id = Column(String(255), unique=True)
+    stripe_customer_id = Column(String(255))
     
     # Dates
     start_date = Column(DateTime, default=datetime.utcnow)
-    end_date = Column(DateTime, nullable=True)  # None for active subscriptions
-    current_period_start = Column(DateTime, default=datetime.utcnow)
-    current_period_end = Column(DateTime, default=lambda: datetime.utcnow() + timedelta(days=30))
+    end_date = Column(DateTime)
+    current_period_start = Column(DateTime)
+    current_period_end = Column(DateTime)
     
     # Cancellation
     cancel_at_period_end = Column(Boolean, default=False)
-    cancelled_at = Column(DateTime, nullable=True)
+    cancelled_at = Column(DateTime)
     
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -73,7 +98,7 @@ class UserSubscription(Base):
     
     # Relationships
     user = relationship("User", back_populates="subscriptions")
-    plan = relationship("SubscriptionPlan", back_populates="user_subscriptions")
+    plan = relationship("SubscriptionPlan", back_populates="subscriptions")
     
     def __repr__(self):
         return f"<UserSubscription(user_id={self.user_id}, plan={self.plan_id}, status={self.status})>"

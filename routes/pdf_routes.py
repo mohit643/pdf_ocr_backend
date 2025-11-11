@@ -1,5 +1,5 @@
 # ==========================================
-# FILE: routes/pdf_routes.py (CORRECTED)
+# FILE: routes/pdf_routes.py (COMPLETE)
 # ==========================================
 """
 PDF Routes - File-based storage with Google Drive Integration
@@ -14,7 +14,6 @@ import uuid
 import os
 import json
 import shutil
-import subprocess
 
 from config import settings
 from schemas import DownloadRequest
@@ -25,11 +24,6 @@ from utils.pdf_processor import (
 import fitz
 from pydantic import BaseModel
 from typing import List, Optional
-
-# ✅ NEW IMPORTS FOR CONVERTERS
-from PIL import Image
-import img2pdf
-
 router = APIRouter(prefix="/api", tags=["PDF"])
 
 # In-memory storage for session data
@@ -59,8 +53,6 @@ class PDFMergeItem(BaseModel):
 
 class MergeEditedRequest(BaseModel):
     pdfs: List[PDFMergeItem]
-
-
 @router.post("/upload")
 async def upload_pdf(
     file: UploadFile = File(...),
@@ -70,6 +62,7 @@ async def upload_pdf(
     if not file.filename.endswith('.pdf'):
         raise HTTPException(400, "Only PDF files allowed")
     
+    # Extract user from token
     user_email = None
     if authorization:
         try:
@@ -90,16 +83,19 @@ async def upload_pdf(
         if user_email:
             print(f"👤 User: {user_email}")
         
+        # Save file locally
         file_data = await file.read()
         file_size = len(file_data)
         
         with open(file_path, 'wb') as f:
             f.write(file_data)
         
+        # Get PDF metadata
         doc = fitz.open(str(file_path))
         total_pages = len(doc)
         doc.close()
         
+        # Process all pages
         all_pages = []
         for page_num in range(total_pages):
             page_img = render_page_as_image(str(file_path), page_num, 2.0)
@@ -120,6 +116,7 @@ async def upload_pdf(
                 'text_blocks': text_blocks
             })
         
+        # Store session data in memory with user link
         SESSIONS[session_id] = {
             'original_filename': file.filename,
             'stored_filename': stored_filename,
@@ -153,6 +150,7 @@ async def download_pdf(request: DownloadRequest):
     if len(request.edits) == 0 and len(request.signatures) == 0:
         raise HTTPException(400, "No changes to save")
     
+    # Get session data from memory
     session_data = SESSIONS.get(request.session_id)
     if not session_data:
         raise HTTPException(404, "Session not found")
@@ -172,12 +170,14 @@ async def download_pdf(request: DownloadRequest):
         
         current_input = original_path
         
+        # Apply text edits
         if len(request.edits) > 0:
             success = apply_text_edits(current_input, request.edits, str(temp_path))
             if not success:
                 raise HTTPException(500, "Failed to apply text edits")
             current_input = str(temp_path)
         
+        # Apply signatures
         if len(request.signatures) > 0:
             if current_input == original_path:
                 shutil.copy(original_path, temp_path)
@@ -191,12 +191,14 @@ async def download_pdf(request: DownloadRequest):
         else:
             shutil.move(temp_path, output_path)
         
+        # Cleanup temp file
         if Path(temp_path).exists() and Path(temp_path) != Path(output_path):
             try:
                 os.remove(temp_path)
             except:
                 pass
         
+        # Upload to Google Drive
         drive_link = None
         drive_file_id = None
         
@@ -260,10 +262,14 @@ async def merge_pdfs(
     files: List[UploadFile] = File(...),
     authorization: str = Header(None)
 ):
-    """Merge multiple PDF files into one"""
+    """
+    Merge multiple PDF files into one
+    Accepts multiple PDF files and returns a single merged PDF
+    """
     if len(files) < 2:
         raise HTTPException(400, "At least 2 PDF files required for merging")
     
+    # Verify all files are PDFs
     for file in files:
         if not file.filename.endswith('.pdf'):
             raise HTTPException(400, f"File '{file.filename}' is not a PDF")
@@ -273,22 +279,30 @@ async def merge_pdfs(
         
         print(f"🔗 Starting merge of {len(files)} PDFs...")
         
+        # Create merger instance
         merger = PdfMerger()
+        
+        # Temporary files to store uploaded PDFs
         temp_files = []
         
         try:
+            # Save uploaded files temporarily and merge
             for idx, file in enumerate(files, 1):
                 print(f"  📄 Processing file {idx}/{len(files)}: {file.filename}")
                 
+                # Read file content
                 content = await file.read()
                 
+                # Create temp file
                 temp_filename = f"temp_merge_{uuid.uuid4().hex[:8]}_{file.filename}"
                 temp_path = settings.UPLOAD_DIR / temp_filename
                 temp_files.append(temp_path)
                 
+                # Write content to temp file
                 with open(temp_path, 'wb') as f:
                     f.write(content)
                 
+                # Append to merger
                 try:
                     merger.append(str(temp_path))
                     print(f"    ✓ Added successfully")
@@ -296,18 +310,22 @@ async def merge_pdfs(
                     print(f"    ✗ Failed to add: {str(e)}")
                     raise HTTPException(400, f"Failed to merge '{file.filename}': {str(e)}")
             
+            # Create output in memory
             print(f"  🔨 Writing merged PDF...")
             output = BytesIO()
             merger.write(output)
             merger.close()
             output.seek(0)
             
+            # Generate filename
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             merged_filename = f"merged_{timestamp}.pdf"
             
+            # Get file size for logging
             output_size = output.getbuffer().nbytes
             print(f"✅ Merge complete: {merged_filename} ({output_size} bytes)")
             
+            # Return as streaming response
             return StreamingResponse(
                 output,
                 media_type="application/pdf",
@@ -325,6 +343,7 @@ async def merge_pdfs(
             raise HTTPException(500, f"Merge failed: {str(e)}")
             
         finally:
+            # Cleanup temporary files
             print(f"  🗑️ Cleaning up {len(temp_files)} temporary files...")
             for temp_file in temp_files:
                 try:
@@ -342,413 +361,6 @@ async def merge_pdfs(
         traceback.print_exc()
         raise HTTPException(500, f"Merge operation failed: {str(e)}")
 
-
-@router.post("/merge-edited-pdfs")
-async def merge_edited_pdfs(
-    request: MergeEditedRequest,
-    authorization: str = Header(None)
-):
-    """Merge PDFs with their edits applied"""
-    from PyPDF2 import PdfMerger
-    
-    pdfs_data = request.pdfs
-    
-    if len(pdfs_data) < 2:
-        raise HTTPException(400, "At least 2 PDFs required")
-    
-    try:
-        print(f"🔗 Merging {len(pdfs_data)} edited PDFs...")
-        
-        merger = PdfMerger()
-        temp_files = []
-        
-        try:
-            for idx, pdf_info in enumerate(pdfs_data, 1):
-                session_id = pdf_info.session_id
-                edits = [edit.dict() for edit in pdf_info.edits]
-                signatures = [sig.dict() for sig in pdf_info.signatures]
-                
-                print(f"  📄 {idx}. Session: {session_id}")
-                print(f"      Edits: {len(edits)}, Signatures: {len(signatures)}")
-                
-                session_data = SESSIONS.get(session_id)
-                if not session_data:
-                    raise HTTPException(404, f"Session {session_id} not found")
-                
-                original_path = session_data['file_path']
-                
-                if not Path(original_path).exists():
-                    raise HTTPException(404, f"Original file not found: {original_path}")
-                
-                if len(edits) == 0 and len(signatures) == 0:
-                    print(f"      Using original: {session_data['original_filename']}")
-                    merger.append(original_path)
-                    continue
-                
-                print(f"      Processing with changes: {session_data['original_filename']}")
-                
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                temp_edited_path = settings.OUTPUT_DIR / f"temp_edited_{idx}_{timestamp}_{uuid.uuid4().hex[:8]}.pdf"
-                temp_files.append(temp_edited_path)
-                
-                current_input = original_path
-                
-                if len(edits) > 0:
-                    temp_edits_path = settings.OUTPUT_DIR / f"temp_edits_{idx}_{timestamp}_{uuid.uuid4().hex[:8]}.pdf"
-                    temp_files.append(temp_edits_path)
-                    
-                    print(f"      Applying {len(edits)} text edits...")
-                    success = apply_text_edits(current_input, edits, str(temp_edits_path))
-                    if not success:
-                        raise HTTPException(500, f"Failed to apply edits to PDF {idx}")
-                    current_input = str(temp_edits_path)
-                    print(f"      ✓ Text edits applied")
-                
-                if len(signatures) > 0:
-                    print(f"      Applying {len(signatures)} signatures...")
-                    if current_input == original_path:
-                        shutil.copy(original_path, temp_edited_path)
-                        current_input = str(temp_edited_path)
-                    
-                    success = apply_signatures(current_input, signatures, str(temp_edited_path))
-                    if not success:
-                        raise HTTPException(500, f"Failed to apply signatures to PDF {idx}")
-                    print(f"      ✓ Signatures applied")
-                else:
-                    if current_input != original_path:
-                        shutil.copy(current_input, temp_edited_path)
-                
-                merger.append(str(temp_edited_path))
-                print(f"      ✓ Added to merge queue")
-            
-            print(f"  🔨 Writing merged PDF...")
-            output = BytesIO()
-            merger.write(output)
-            merger.close()
-            output.seek(0)
-            
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            merged_filename = f"merged_edited_{timestamp}.pdf"
-            
-            output_size = output.getbuffer().nbytes
-            print(f"✅ Merge complete: {merged_filename} ({output_size} bytes)")
-            
-            return StreamingResponse(
-                output,
-                media_type="application/pdf",
-                headers={
-                    "Content-Disposition": f"attachment; filename={merged_filename}",
-                    "X-Merged-Files": str(len(pdfs_data)),
-                    "X-Output-Size": str(output_size)
-                }
-            )
-            
-        finally:
-            print(f"  🗑️ Cleaning up {len(temp_files)} temporary files...")
-            for temp_file in temp_files:
-                try:
-                    if temp_file.exists():
-                        os.remove(temp_file)
-                        print(f"      ✓ Removed: {temp_file.name}")
-                except Exception as e:
-                    print(f"      ✗ Failed to remove {temp_file.name}: {str(e)}")
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"❌ Merge error: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(500, f"Merge failed: {str(e)}")
-
-
-# ==========================================
-# ✅ NEW: CONVERTER ENDPOINTS
-# ==========================================
-
-@router.post("/convert-images-to-pdf")
-async def convert_images_to_pdf(
-    images: List[UploadFile] = File(...),
-    authorization: str = Header(None)
-):
-    """Convert multiple images to a single PDF"""
-    if len(images) == 0:
-        raise HTTPException(400, "No images provided")
-    
-    user_email = None
-    if authorization:
-        try:
-            from routes.auth_routes import SESSIONS as AUTH_SESSIONS
-            token = authorization.replace("Bearer ", "")
-            if token in AUTH_SESSIONS:
-                user_email = AUTH_SESSIONS[token].get("email")
-        except:
-            pass
-    
-    try:
-        print(f"🖼️ Converting {len(images)} images to PDF...")
-        temp_image_paths = []
-        
-        try:
-            for idx, image in enumerate(images, 1):
-                if not image.content_type.startswith('image/'):
-                    raise HTTPException(400, f"'{image.filename}' is not an image")
-                
-                content = await image.read()
-                temp_filename = f"temp_img_{uuid.uuid4().hex[:8]}_{image.filename}"
-                temp_path = settings.UPLOAD_DIR / temp_filename
-                temp_image_paths.append(temp_path)
-                
-                with open(temp_path, 'wb') as f:
-                    f.write(content)
-                
-                # Validate and convert image
-                img = Image.open(temp_path)
-                if img.mode == 'RGBA':
-                    rgb_img = Image.new('RGB', img.size, (255, 255, 255))
-                    rgb_img.paste(img, mask=img.split()[3])
-                    rgb_img.save(temp_path)
-                elif img.mode != 'RGB':
-                    img.convert('RGB').save(temp_path)
-            
-            # Convert to PDF
-            pdf_bytes = img2pdf.convert([str(path) for path in temp_image_paths])
-            output = BytesIO(pdf_bytes)
-            output.seek(0)
-            
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            pdf_filename = f"images_to_pdf_{timestamp}.pdf"
-            
-            print(f"✅ Conversion complete: {pdf_filename}")
-            
-            return StreamingResponse(
-                output,
-                media_type="application/pdf",
-                headers={
-                    "Content-Disposition": f"attachment; filename={pdf_filename}",
-                    "X-Image-Count": str(len(images))
-                }
-            )
-            
-        finally:
-            for temp_file in temp_image_paths:
-                try:
-                    if temp_file.exists():
-                        os.remove(temp_file)
-                except:
-                    pass
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"❌ Image to PDF error: {str(e)}")
-        raise HTTPException(500, f"Conversion failed: {str(e)}")
-
-
-@router.post("/convert-word-to-pdf")
-async def convert_word_to_pdf(
-    file: UploadFile = File(...),
-    authorization: str = Header(None)
-):
-    """
-    Convert Word document to PDF using python-docx + reportlab
-    Works on Windows, Mac, Linux - No LibreOffice needed!
-    """
-    if not (file.filename.endswith('.doc') or file.filename.endswith('.docx')):
-        raise HTTPException(400, "Only .doc and .docx files supported")
-    
-    try:
-        # Try to import required libraries
-        try:
-            from docx import Document
-            from reportlab.lib.pagesizes import letter, A4
-            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-            from reportlab.lib.units import inch
-            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
-            from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT, TA_JUSTIFY
-            from reportlab.pdfbase import pdfmetrics
-            from reportlab.pdfbase.ttfonts import TTFont
-        except ImportError as e:
-            print(f"❌ Missing package: {str(e)}")
-            raise HTTPException(
-                500, 
-                "Required packages not installed. Please run: pip install python-docx reportlab"
-            )
-        
-        print(f"📝 Converting Word to PDF: {file.filename}")
-        
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        temp_word_filename = f"temp_word_{timestamp}_{uuid.uuid4().hex[:8]}_{file.filename}"
-        temp_word_path = settings.UPLOAD_DIR / temp_word_filename
-        
-        temp_pdf_filename = f"temp_pdf_{timestamp}_{uuid.uuid4().hex[:8]}.pdf"
-        temp_pdf_path = settings.OUTPUT_DIR / temp_pdf_filename
-        
-        try:
-            # Save Word file
-            content = await file.read()
-            with open(temp_word_path, 'wb') as f:
-                f.write(content)
-            
-            print(f"  💾 Saved Word file: {temp_word_path.name}")
-            
-            # Read Word document
-            doc = Document(str(temp_word_path))
-            
-            # Create PDF with A4 page size
-            pdf_doc = SimpleDocTemplate(
-                str(temp_pdf_path),
-                pagesize=A4,
-                rightMargin=72,
-                leftMargin=72,
-                topMargin=72,
-                bottomMargin=36
-            )
-            
-            # Container for PDF elements
-            story = []
-            styles = getSampleStyleSheet()
-            
-            # Define custom styles
-            normal_style = ParagraphStyle(
-                'CustomNormal',
-                parent=styles['Normal'],
-                fontSize=11,
-                leading=16,
-                alignment=TA_LEFT,
-                spaceAfter=10
-            )
-            
-            heading1_style = ParagraphStyle(
-                'CustomHeading1',
-                parent=styles['Heading1'],
-                fontSize=18,
-                leading=22,
-                textColor='#000000',
-                spaceAfter=16,
-                spaceBefore=12,
-                fontName='Helvetica-Bold'
-            )
-            
-            heading2_style = ParagraphStyle(
-                'CustomHeading2',
-                parent=styles['Heading2'],
-                fontSize=14,
-                leading=18,
-                textColor='#000000',
-                spaceAfter=12,
-                spaceBefore=10,
-                fontName='Helvetica-Bold'
-            )
-            
-            title_style = ParagraphStyle(
-                'CustomTitle',
-                parent=styles['Title'],
-                fontSize=22,
-                leading=26,
-                textColor='#000000',
-                spaceAfter=20,
-                alignment=TA_CENTER,
-                fontName='Helvetica-Bold'
-            )
-            
-            # Process document
-            print(f"  📄 Processing {len(doc.paragraphs)} paragraphs...")
-            
-            for idx, para in enumerate(doc.paragraphs):
-                text = para.text.strip()
-                
-                if not text:
-                    # Add small spacer for empty paragraphs
-                    story.append(Spacer(1, 0.1 * inch))
-                    continue
-                
-                # Escape special characters for PDF
-                text = text.replace('&', '&amp;')
-                text = text.replace('<', '&lt;')
-                text = text.replace('>', '&gt;')
-                
-                # Determine style based on Word style
-                style_name = para.style.name
-                
-                if style_name == 'Title':
-                    p = Paragraph(text, title_style)
-                elif style_name.startswith('Heading 1'):
-                    p = Paragraph(text, heading1_style)
-                elif style_name.startswith('Heading 2'):
-                    p = Paragraph(text, heading2_style)
-                elif style_name.startswith('Heading'):
-                    p = Paragraph(text, heading2_style)
-                else:
-                    # Check for bold text in runs
-                    has_bold = any(run.bold for run in para.runs if run.text.strip())
-                    if has_bold and len(text) < 100:
-                        # Short bold text might be a heading
-                        p = Paragraph(f"<b>{text}</b>", normal_style)
-                    else:
-                        p = Paragraph(text, normal_style)
-                
-                story.append(p)
-            
-            # Add tables if any
-            for table in doc.tables:
-                story.append(Spacer(1, 0.2 * inch))
-                for row in table.rows:
-                    row_text = " | ".join(cell.text.strip() for cell in row.cells if cell.text.strip())
-                    if row_text:
-                        p = Paragraph(row_text, normal_style)
-                        story.append(p)
-                story.append(Spacer(1, 0.2 * inch))
-            
-            # Build PDF
-            print(f"  🔨 Building PDF...")
-            pdf_doc.build(story)
-            
-            print(f"  ✅ PDF created: {temp_pdf_path.name}")
-            
-            # Read PDF
-            with open(temp_pdf_path, 'rb') as f:
-                pdf_content = f.read()
-            
-            output = BytesIO(pdf_content)
-            output.seek(0)
-            
-            # Generate final filename
-            final_filename = file.filename.rsplit('.', 1)[0] + '.pdf'
-            
-            print(f"✅ Conversion complete: {final_filename} ({len(pdf_content)} bytes)")
-            
-            return StreamingResponse(
-                output,
-                media_type="application/pdf",
-                headers={
-                    "Content-Disposition": f"attachment; filename={final_filename}",
-                    "X-Conversion-Method": "python-docx-reportlab"
-                }
-            )
-            
-        finally:
-            # Cleanup temporary files
-            print(f"  🗑️ Cleaning up temporary files...")
-            for temp_file in [temp_word_path, temp_pdf_path]:
-                try:
-                    if temp_file.exists():
-                        os.remove(temp_file)
-                        print(f"    ✓ Removed: {temp_file.name}")
-                except Exception as e:
-                    print(f"    ✗ Failed to remove {temp_file.name}: {str(e)}")
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"❌ Word to PDF error: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(500, f"Conversion failed: {str(e)}")
-
-# ==========================================
-# UTILITY ENDPOINTS
-# ==========================================
 
 @router.get("/stats")
 async def get_stats():
@@ -793,15 +405,18 @@ async def delete_pdf(pdf_id: str):
         raise HTTPException(404, "PDF not found")
     
     try:
+        # Delete file
         file_path = Path(session_data['file_path'])
         if file_path.exists():
             os.remove(file_path)
         
+        # Delete thumbnails
         for page in session_data['pages']:
             thumb_path = settings.THUMBNAIL_DIR / f"{pdf_id}_page_{page['page_num']}.png"
             if thumb_path.exists():
                 os.remove(thumb_path)
         
+        # Remove from sessions
         del SESSIONS[pdf_id]
         
         return {"message": "PDF deleted successfully"}
@@ -810,7 +425,136 @@ async def delete_pdf(pdf_id: str):
         print(f"❌ Delete error: {str(e)}")
         raise HTTPException(500, f"Failed to delete PDF: {str(e)}")
 
-
+@router.post("/merge-edited-pdfs")
+async def merge_edited_pdfs(
+    request: MergeEditedRequest,
+    authorization: str = Header(None)
+):
+    """
+    Merge PDFs with their edits applied
+    """
+    from PyPDF2 import PdfMerger
+    
+    pdfs_data = request.pdfs
+    
+    if len(pdfs_data) < 2:
+        raise HTTPException(400, "At least 2 PDFs required")
+    
+    try:
+        print(f"🔗 Merging {len(pdfs_data)} edited PDFs...")
+        
+        merger = PdfMerger()
+        temp_files = []
+        
+        try:
+            # Process each PDF with its edits
+            for idx, pdf_info in enumerate(pdfs_data, 1):
+                session_id = pdf_info.session_id
+                edits = [edit.dict() for edit in pdf_info.edits]
+                signatures = [sig.dict() for sig in pdf_info.signatures]
+                
+                print(f"  📄 {idx}. Session: {session_id}")
+                print(f"      Edits: {len(edits)}, Signatures: {len(signatures)}")
+                
+                # Get session data
+                session_data = SESSIONS.get(session_id)
+                if not session_data:
+                    raise HTTPException(404, f"Session {session_id} not found")
+                
+                original_path = session_data['file_path']
+                
+                if not Path(original_path).exists():
+                    raise HTTPException(404, f"Original file not found: {original_path}")
+                
+                # If no edits, use original
+                if len(edits) == 0 and len(signatures) == 0:
+                    print(f"      Using original: {session_data['original_filename']}")
+                    merger.append(original_path)
+                    continue
+                
+                # Apply edits/signatures
+                print(f"      Processing with changes: {session_data['original_filename']}")
+                
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                temp_edited_path = settings.OUTPUT_DIR / f"temp_edited_{idx}_{timestamp}_{uuid.uuid4().hex[:8]}.pdf"
+                temp_files.append(temp_edited_path)
+                
+                current_input = original_path
+                
+                # Apply text edits
+                if len(edits) > 0:
+                    temp_edits_path = settings.OUTPUT_DIR / f"temp_edits_{idx}_{timestamp}_{uuid.uuid4().hex[:8]}.pdf"
+                    temp_files.append(temp_edits_path)
+                    
+                    print(f"      Applying {len(edits)} text edits...")
+                    success = apply_text_edits(current_input, edits, str(temp_edits_path))
+                    if not success:
+                        raise HTTPException(500, f"Failed to apply edits to PDF {idx}")
+                    current_input = str(temp_edits_path)
+                    print(f"      ✓ Text edits applied")
+                
+                # Apply signatures
+                if len(signatures) > 0:
+                    print(f"      Applying {len(signatures)} signatures...")
+                    if current_input == original_path:
+                        shutil.copy(original_path, temp_edited_path)
+                        current_input = str(temp_edited_path)
+                    
+                    success = apply_signatures(current_input, signatures, str(temp_edited_path))
+                    if not success:
+                        raise HTTPException(500, f"Failed to apply signatures to PDF {idx}")
+                    print(f"      ✓ Signatures applied")
+                else:
+                    if current_input != original_path:
+                        shutil.copy(current_input, temp_edited_path)
+                
+                # Add to merger
+                merger.append(str(temp_edited_path))
+                print(f"      ✓ Added to merge queue")
+            
+            # Create merged output
+            print(f"  🔨 Writing merged PDF...")
+            output = BytesIO()
+            merger.write(output)
+            merger.close()
+            output.seek(0)
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            merged_filename = f"merged_edited_{timestamp}.pdf"
+            
+            output_size = output.getbuffer().nbytes
+            print(f"✅ Merge complete: {merged_filename} ({output_size} bytes)")
+            
+            return StreamingResponse(
+                output,
+                media_type="application/pdf",
+                headers={
+                    "Content-Disposition": f"attachment; filename={merged_filename}",
+                    "X-Merged-Files": str(len(pdfs_data)),
+                    "X-Output-Size": str(output_size)
+                }
+            )
+            
+        finally:
+            # Cleanup
+            print(f"  🗑️ Cleaning up {len(temp_files)} temporary files...")
+            for temp_file in temp_files:
+                try:
+                    if temp_file.exists():
+                        os.remove(temp_file)
+                        print(f"      ✓ Removed: {temp_file.name}")
+                except Exception as e:
+                    print(f"      ✗ Failed to remove {temp_file.name}: {str(e)}")
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Merge error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(500, f"Merge failed: {str(e)}")
+    
+    
 @router.get("/health")
 async def health_check():
     """Health check endpoint"""
